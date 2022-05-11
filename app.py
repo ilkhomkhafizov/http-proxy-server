@@ -16,23 +16,26 @@ SYMBOL = config('SYMBOL', cast=str)
 class ProxyParameter:
     PATTERN = re.compile(r"\b(\w{%d})\b" % LETTERS_NUMBER)
     SUBST = "\\1%s" % SYMBOL
-    TAGS = ['span', 'p', 'a']
 
     def __init__(self):
         self.logger = logging
         self.error = ''
-        self.data = ''
-        self.content_type = ''
-        self.status_code = 200
+        self.content_type = 'text/html'
+        self.status_code = 404
+        self.response = b"Page Not Found"
 
     def _error(self, message):
         self.error = message
         self.logger.error(message)
 
     def fetch_data(self, url):
-        response = urllib.request.urlopen(ROOT_URL + url)
-        self.logger.info(f"Data fetched from {ROOT_URL + url}")
-        return response
+        try:
+            response = urllib.request.urlopen(ROOT_URL + url)
+            self.logger.info(f"Data fetched from {ROOT_URL + url}")
+            return response
+        except Exception as error:
+            self.logger.error("Can't open url", error)
+            return False
 
     def _set_content_type(self, response):
         self.content_type = response.getheader('content-type')
@@ -51,17 +54,17 @@ class ProxyParameter:
             return False
 
     def customize_response(self, soup):
-        span_arr = soup.find_all(self.TAGS)
-        for element_arr in span_arr:
-            for el in element_arr:
-                el.string = self.PATTERN.sub(self.SUBST, el.text)
-        return soup
+        find_text = soup.find_all(text=self.PATTERN)
+        for text_el in find_text:
+            fixed_text = self.PATTERN.sub(self.SUBST, text_el)
+            text_el.replace_with(fixed_text)
+        return soup.prettify().encode()
 
     def start(self, url):
         # Fetch data
         response = self.fetch_data(url)
         if not response:
-            return False
+            return self.response
         # Set content type
         if not self._set_content_type(response):
             return False
@@ -69,14 +72,11 @@ class ProxyParameter:
         if not self._set_status_code(response):
             return False
         # Parse response with Beautiful soup
-        soup = self.parse_response(response)
-        if not soup:
-            return False
-        # Customize response
-        custom_response = self.customize_response(soup)
-        if not custom_response:
-            return False
-        return custom_response
+        if not ('.js' in response.url or '.css' in response.url or '.gif' in response.url or '.jpg' in response.url):
+            soup = self.parse_response(response)
+            custom_response = self.customize_response(soup)
+            return custom_response
+        return response.read()
 
 
 class MyProxy(SimpleHTTPServer.SimpleHTTPRequestHandler):
@@ -88,7 +88,7 @@ class MyProxy(SimpleHTTPServer.SimpleHTTPRequestHandler):
         self.send_response(self.custom_response.status_code)
         self.send_header("Content-type", self.custom_response.content_type)
         self.end_headers()
-        self.wfile.write(custom_html.prettify().encode())
+        self.wfile.write(custom_html)
 
 
 class Server:
